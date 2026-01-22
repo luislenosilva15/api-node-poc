@@ -8,6 +8,10 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+app.get("", (req, res) => {
+  res.send("API is running");
+});
+
 /**
  * GET /users?page=1&limit=10
  * Paginação
