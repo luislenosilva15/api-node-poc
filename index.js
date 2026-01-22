@@ -101,7 +101,7 @@ app.post("/users", async (req, res) => {
 app.put("/users/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { name, email } = req.body;
+    const { name, email, phone } = req.body;
 
     const userExists = await prisma.user.findUnique({
       where: { id },
@@ -116,6 +116,7 @@ app.put("/users/:id", async (req, res) => {
       data: {
         ...(name && { name }),
         ...(email && { email }),
+        ...(phone && { phone }),
       },
     });
 
