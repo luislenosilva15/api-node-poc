@@ -81,6 +81,7 @@ app.post("/users", async (req, res) => {
 
     res.status(201).json(user);
   } catch (error) {
+    console.error(error);
     if (error.code === "P2002") {
       return res.status(400).json({ error: "Email já cadastrado" });
     }
