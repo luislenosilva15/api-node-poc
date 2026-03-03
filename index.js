@@ -26,7 +26,7 @@ app.get("/users", async (req, res) => {
       prisma.user.findMany({
         skip,
         take: limit,
-        orderBy: { id: "asc" },
+        orderBy: { id: "desc" },
       }),
       prisma.user.count(),
     ]);
