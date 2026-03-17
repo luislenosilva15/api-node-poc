@@ -173,7 +173,7 @@ app.post("/users", async (req, res) => {
 
     const hashedPassword = password
       ? await bcrypt.hash(password, 10)
-      : "$2a$10$8K1p/a0dL1LXMIgoEDFrwOfMQHzXK/H5Zv1v0pIj5.U0Gzp8LrGaC"; // default: 2013011
+      : "$2b$10$J3fpIP83PX3b5G181mZy6OCM6kI.udUbP705dAFEgSxwWuga7/dPC"; // default: 20113011
 
     const user = await prisma.user.create({
       data: { name, email, phone, password: hashedPassword },

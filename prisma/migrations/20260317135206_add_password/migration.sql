@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ALTER COLUMN "password" SET DEFAULT '$2b$10$2y49b5.QOjNTdq0GDwpkGuu.ouSq2E0PNnJhjyNT3oXjp1H4RPGDW';
