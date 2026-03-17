@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "password" TEXT NOT NULL DEFAULT '$2a$10$8K1p/a0dL1LXMIgoEDFrwOfMQHzXK/H5Zv1v0pIj5.U0Gzp8LrGaC';
