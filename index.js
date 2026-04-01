@@ -3,13 +3,36 @@ import cors from "cors";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import multer from "multer";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || "sua_chave_secreta_jwt_2024";
 
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({ storage });
+
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(uploadsDir));
 
 app.get("", (req, res) => {
   res.send("API is running");
@@ -426,6 +449,247 @@ app.delete("/products/:id", async (req, res) => {
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: "Erro ao deletar produto" });
+  }
+});
+
+// ========== POSTS CRUD ==========
+
+/**
+ * GET /posts?page=1&limit=10&name=busca&category=categoria
+ * Listar posts com paginação
+ */
+app.get("/posts", async (req, res) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const name = req.query.name;
+    const category = req.query.category;
+
+    const where = {
+      ...(name && { name: { contains: name, mode: "insensitive" } }),
+      ...(category && { category: { contains: category, mode: "insensitive" } }),
+    };
+
+    const [posts, total] = await Promise.all([
+      prisma.post.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          _count: { select: { likes: true } },
+        },
+      }),
+      prisma.post.count({ where }),
+    ]);
+
+    res.json({
+      data: posts,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao listar posts" });
+  }
+});
+
+/**
+ * GET /posts/:id
+ * Buscar post único
+ */
+app.get("/posts/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    const post = await prisma.post.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        _count: { select: { likes: true } },
+      },
+    });
+
+    if (!post) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    res.json(post);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao buscar post" });
+  }
+});
+
+/**
+ * POST /posts
+ * Criar post — multipart/form-data
+ * Campos: name, category, price, userId + imagem opcional no campo "image"
+ */
+app.post("/posts", upload.single("image"), async (req, res) => {
+  try {
+    const { name, category, price, userId } = req.body;
+
+    if (!name || !category || price === undefined || !userId) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        error: "name, category, price e userId são obrigatórios",
+      });
+    }
+
+    const userExists = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+    });
+
+    if (!userExists) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: "Usuário não encontrado" });
+    }
+
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+
+    const post = await prisma.post.create({
+      data: {
+        name,
+        category,
+        price: parseFloat(price),
+        userId: Number(userId),
+        image: imageUrl,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        _count: { select: { likes: true } },
+      },
+    });
+
+    res.status(201).json(post);
+  } catch (error) {
+    if (req.file) fs.unlinkSync(req.file.path);
+    console.error(error);
+    res.status(500).json({ error: "Erro ao criar post" });
+  }
+});
+
+/**
+ * PUT /posts/:id
+ * Editar post — multipart/form-data ou JSON
+ * Todos os campos são opcionais. Envie "image" como arquivo para trocar a imagem.
+ */
+app.put("/posts/:id", upload.single("image"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { name, category, price } = req.body;
+
+    const postExists = await prisma.post.findUnique({ where: { id } });
+
+    if (!postExists) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    let imageUrl = undefined;
+    if (req.file) {
+      if (postExists.image) {
+        const oldPath = path.join(__dirname, postExists.image);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+      imageUrl = `/uploads/${req.file.filename}`;
+    }
+
+    const post = await prisma.post.update({
+      where: { id },
+      data: {
+        ...(name && { name }),
+        ...(category && { category }),
+        ...(price !== undefined && { price: parseFloat(price) }),
+        ...(imageUrl !== undefined && { image: imageUrl }),
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        _count: { select: { likes: true } },
+      },
+    });
+
+    res.json(post);
+  } catch (error) {
+    if (req.file) fs.unlinkSync(req.file.path);
+    console.error(error);
+    res.status(500).json({ error: "Erro ao atualizar post" });
+  }
+});
+
+/**
+ * DELETE /posts/:id
+ * Deletar post
+ */
+app.delete("/posts/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    const postExists = await prisma.post.findUnique({ where: { id } });
+
+    if (!postExists) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    if (postExists.image) {
+      const imgPath = path.join(__dirname, postExists.image);
+      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+    }
+
+    await prisma.postLike.deleteMany({ where: { postId: id } });
+    await prisma.post.delete({ where: { id } });
+
+    res.status(204).send();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao deletar post" });
+  }
+});
+
+/**
+ * POST /posts/:id/like
+ * Toggle like — adiciona se não existir, remove se já existir
+ * Body: { userId }
+ */
+app.post("/posts/:id/like", async (req, res) => {
+  try {
+    const postId = Number(req.params.id);
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId é obrigatório" });
+    }
+
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) {
+      return res.status(404).json({ error: "Post não encontrado" });
+    }
+
+    const existing = await prisma.postLike.findUnique({
+      where: { postId_userId: { postId, userId: Number(userId) } },
+    });
+
+    if (existing) {
+      await prisma.postLike.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.postLike.create({
+        data: { postId, userId: Number(userId) },
+      });
+    }
+
+    const likeCount = await prisma.postLike.count({ where: { postId } });
+
+    res.json({ liked: !existing, likeCount });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao processar like" });
   }
 });
 
