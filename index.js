@@ -12,8 +12,8 @@ const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || "sua_chave_secreta_jwt_2024";
 
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  "https://qorqohjcceinufpyspag.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvcnFvaGpjY2VpbnVmcHlzcGFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQzMzM5MjAsImV4cCI6MjA2OTkwOTkyMH0.QzDWGWgRyrbBrYY6-ralxAhgPgs5RCVXr31OXJZprNA",
 );
 
 const STORAGE_BUCKET = process.env.SUPABASE_BUCKET || "posts";
@@ -33,9 +33,7 @@ async function uploadImageToSupabase(file) {
 
   if (error) throw error;
 
-  const { data } = supabase.storage
-    .from(STORAGE_BUCKET)
-    .getPublicUrl(filename);
+  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filename);
 
   return data.publicUrl;
 }
