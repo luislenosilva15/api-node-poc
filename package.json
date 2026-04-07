@@ -4,12 +4,13 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
+    "start": "node --env-file=.env index.js",
+    "dev": "nodemon --env-file=.env index.js",
     "prisma": "prisma"
   },
   "dependencies": {
     "@prisma/client": "^5.0.0",
+    "@supabase/supabase-js": "^2.102.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^4.18.2",

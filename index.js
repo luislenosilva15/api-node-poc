@@ -5,34 +5,49 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import multer from "multer";
 import path from "path";
-import { fileURLToPath } from "url";
-import fs from "fs";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || "sua_chave_secreta_jwt_2024";
 
-const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  },
-});
+const STORAGE_BUCKET = process.env.SUPABASE_BUCKET || "posts";
 
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static(uploadsDir));
+
+async function uploadImageToSupabase(file) {
+  const ext = path.extname(file.originalname);
+  const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`;
+
+  const { error } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(filename, file.buffer, { contentType: file.mimetype });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(filename);
+
+  return data.publicUrl;
+}
+
+async function deleteImageFromSupabase(imageUrl) {
+  if (!imageUrl) return;
+  const marker = `/object/public/${STORAGE_BUCKET}/`;
+  const idx = imageUrl.indexOf(marker);
+  if (idx === -1) return;
+  const filename = imageUrl.slice(idx + marker.length);
+  await supabase.storage.from(STORAGE_BUCKET).remove([filename]);
+}
 
 app.get("", (req, res) => {
   res.send("API is running");
@@ -468,7 +483,9 @@ app.get("/posts", async (req, res) => {
 
     const where = {
       ...(name && { name: { contains: name, mode: "insensitive" } }),
-      ...(category && { category: { contains: category, mode: "insensitive" } }),
+      ...(category && {
+        category: { contains: category, mode: "insensitive" },
+      }),
     };
 
     const [posts, total] = await Promise.all([
@@ -537,7 +554,6 @@ app.post("/posts", upload.single("image"), async (req, res) => {
     const { name, category, price, userId } = req.body;
 
     if (!name || !category || price === undefined || !userId) {
-      if (req.file) fs.unlinkSync(req.file.path);
       return res.status(400).json({
         error: "name, category, price e userId são obrigatórios",
       });
@@ -548,11 +564,10 @@ app.post("/posts", upload.single("image"), async (req, res) => {
     });
 
     if (!userExists) {
-      if (req.file) fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: "Usuário não encontrado" });
     }
 
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    const imageUrl = req.file ? await uploadImageToSupabase(req.file) : null;
 
     const post = await prisma.post.create({
       data: {
@@ -570,7 +585,6 @@ app.post("/posts", upload.single("image"), async (req, res) => {
 
     res.status(201).json(post);
   } catch (error) {
-    if (req.file) fs.unlinkSync(req.file.path);
     console.error(error);
     res.status(500).json({ error: "Erro ao criar post" });
   }
@@ -589,17 +603,13 @@ app.put("/posts/:id", upload.single("image"), async (req, res) => {
     const postExists = await prisma.post.findUnique({ where: { id } });
 
     if (!postExists) {
-      if (req.file) fs.unlinkSync(req.file.path);
       return res.status(404).json({ error: "Post não encontrado" });
     }
 
     let imageUrl = undefined;
     if (req.file) {
-      if (postExists.image) {
-        const oldPath = path.join(__dirname, postExists.image);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
-      imageUrl = `/uploads/${req.file.filename}`;
+      await deleteImageFromSupabase(postExists.image);
+      imageUrl = await uploadImageToSupabase(req.file);
     }
 
     const post = await prisma.post.update({
@@ -618,7 +628,6 @@ app.put("/posts/:id", upload.single("image"), async (req, res) => {
 
     res.json(post);
   } catch (error) {
-    if (req.file) fs.unlinkSync(req.file.path);
     console.error(error);
     res.status(500).json({ error: "Erro ao atualizar post" });
   }
@@ -638,10 +647,7 @@ app.delete("/posts/:id", async (req, res) => {
       return res.status(404).json({ error: "Post não encontrado" });
     }
 
-    if (postExists.image) {
-      const imgPath = path.join(__dirname, postExists.image);
-      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
-    }
+    await deleteImageFromSupabase(postExists.image);
 
     await prisma.postLike.deleteMany({ where: { postId: id } });
     await prisma.post.delete({ where: { id } });
